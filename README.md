@@ -29,21 +29,27 @@
 ## 1. 빠른 실행 (로컬, 5분)
 
 이 데모는 **PostgreSQL**을 사용합니다. 로컬에서 띄우려면 Postgres 인스턴스가 필요해요.
-가장 쉬운 방법은 Vercel Postgres 또는 Neon 무료 인스턴스 URL을 그대로 쓰는 것입니다.
+가장 쉬운 방법은 이미 떠 있는 Neon (Vercel Storage)의 연결 문자열을 그대로 쓰는 것입니다.
 
 ```bash
 cd mobidays-demo
-cp .env.example .env.local         # DATABASE_URL 채워주기
-npm install                         # postinstall에서 prisma generate 자동 실행
-npm run db:push                     # 스키마 적용
-npm run seed                        # 시드 데이터 적재
-npm run dev                         # http://localhost:3000
+cp .env.example .env                # DATABASE_URL 채워주기 — ⚠ .env.local 아님 (아래 노트 참고)
+npm install                          # postinstall에서 prisma generate 자동 실행
+npm run db:push                      # 스키마 적용
+npm run seed                         # 시드 데이터 적재
+npm run dev                          # http://localhost:3000
 ```
 
 이후 시드를 초기화하고 싶다면:
 
 - 웹 UI: `/admin/seed` 페이지의 [데이터 초기화] 버튼
 - CLI: `npm run db:reset`
+
+> **왜 `.env.local`이 아니라 `.env`인가요?**
+> Next.js는 `.env.local`을 자동으로 읽지만, **Prisma CLI(`db:push`/`seed`)는 `.env`만 읽습니다.**
+> 양쪽이 같은 `DATABASE_URL`을 보도록 `.env` 한 파일로 통일하세요. 두 파일 모두 `.gitignore`에 등록되어 있어 안전합니다.
+>
+> 이미 Vercel에 프로젝트가 연결되어 있다면 `npx vercel env pull .env` 한 줄로 Neon 자격 증명이 자동 다운로드됩니다.
 
 > 외부 LLM API 키는 필요 없습니다 — 모든 LLM 호출은 **결정론적 mock**입니다.
 
@@ -197,9 +203,14 @@ Framework는 자동으로 Next.js로 인식됩니다. **Deploy 버튼을 아직 
 
 **옵션 A — 로컬 CLI에서 (가장 깔끔)**
 ```bash
-# Vercel 환경변수를 로컬 .env.local로 가져오기
-npx vercel link                     # 프로젝트 연결
-npx vercel env pull .env.local      # DATABASE_URL 등 다운로드
+# Vercel CLI (한 번만)
+npm i -g vercel
+
+# 프로젝트 연결 (한 번만, 브라우저 인증)
+npx vercel link
+
+# 환경변수를 .env로 다운로드 (Prisma CLI는 .env만 읽음)
+npx vercel env pull .env
 
 # 원격 DB에 스키마 + 시드
 npm run db:push
