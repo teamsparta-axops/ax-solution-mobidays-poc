@@ -228,6 +228,7 @@ function HitlQueue() {
   const [loading, setLoading] = useState(true);
   const [fetchFailed, setFetchFailed] = useState(false);
   const [apiEmpty, setApiEmpty] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -255,6 +256,7 @@ function HitlQueue() {
   }, []);
 
   async function handleAction(id: string, type: "mdm" | "message", action: "approve" | "reject") {
+    setActionError(null);
     // Optimistic update
     setItems((prev) =>
       prev.map((item) =>
@@ -265,13 +267,24 @@ function HitlQueue() {
 
     if (!fetchFailed) {
       try {
-        await fetch("/api/hitl", {
+        const res = await fetch("/api/hitl", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ id, type, action, decidedBy: "demo_manager" }),
         });
-      } catch {
-        // ignore, optimistic already applied
+        if (!res.ok) {
+          throw new Error(`서버 오류 (${res.status})`);
+        }
+      } catch (e) {
+        // Rollback optimistic update
+        setItems((prev) =>
+          prev.map((item) =>
+            item.id === id ? { ...item, status: "pending" as const } : item,
+          ),
+        );
+        setStats((prev) => ({ ...prev, pendingCount: prev.pendingCount + 1 }));
+        setActionError("처리 실패 — 다시 시도해 주세요");
+        console.error("HITL action error:", e);
       }
     }
   }
@@ -309,6 +322,11 @@ function HitlQueue() {
       {fetchFailed && (
         <div className="mb-4 rounded-md border border-[color:var(--color-warning)] bg-[color:var(--color-warning-bg)] px-4 py-2 text-xs text-[color:var(--color-warning)]">
           API 연결 실패 — 목 데이터를 표시합니다.
+        </div>
+      )}
+      {actionError && (
+        <div className="mb-4 rounded-md border border-[color:var(--color-danger)] bg-[color:var(--color-danger-bg)] px-4 py-2 text-xs text-[color:var(--color-danger)]">
+          {actionError}
         </div>
       )}
 

@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { memo, useCallback, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   CheckCircle2,
   ChevronDown,
@@ -94,6 +94,7 @@ export function RecommendWizard({
   const [openCardId, setOpenCardId] = useState<string | null>(null);
   const [steps, setSteps] = useState<StepState[]>([]);
   const [streamInfo, setStreamInfo] = useState<string[]>([]);
+  const abortRef = useRef<AbortController | null>(null);
 
   const topicOptions = useMemo(
     () => Array.from(new Set([
@@ -109,6 +110,11 @@ export function RecommendWizard({
     [],
   );
 
+  // Cleanup: abort any in-flight request when component unmounts
+  useEffect(() => {
+    return () => { abortRef.current?.abort(); };
+  }, []);
+
   const toggle = useCallback(<T,>(arr: T[], v: T) => (arr.includes(v) ? arr.filter((x) => x !== v) : [...arr, v]), []);
 
   const toggleOpenCard = useCallback((cmid: string) => {
@@ -116,6 +122,11 @@ export function RecommendWizard({
   }, []);
 
   const onRun = async () => {
+    // Abort any in-progress request
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+
     setLoading(true);
     setResult(null);
     setOpenCardId(null);
@@ -126,6 +137,7 @@ export function RecommendWizard({
       const res = await fetch("/api/recommend-stream", {
         method: "POST",
         headers: { "content-type": "application/json" },
+        signal: controller.signal,
         body: JSON.stringify({
           purpose,
           filters: {
@@ -153,7 +165,7 @@ export function RecommendWizard({
         const lines = buffer.split("\n\n");
         buffer = lines.pop() ?? "";
 
-        for (const chunk of lines) {
+        for (const chunk of lines.filter((l) => l.trim() !== "")) {
           const dataLine = chunk.split("\n").find((l) => l.startsWith("data: "));
           if (!dataLine) continue;
           try {

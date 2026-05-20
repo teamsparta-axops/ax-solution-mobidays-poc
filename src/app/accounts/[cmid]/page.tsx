@@ -28,15 +28,44 @@ export default async function AccountDetailPage({
 }) {
   const { cmid } = await params;
 
-  const account = await prisma.account.findUnique({
-    where: { cmid },
+  type AccountWithRelations = Awaited<ReturnType<typeof prisma.account.findUnique<{
+    where: { cmid: string };
     include: {
-      activities: { orderBy: { occurredAt: "desc" }, take: 10 },
-      contacts: true,
-      externalIds: true,
-      documents: { take: 5, orderBy: { createdAt: "desc" } },
-    },
-  });
+      activities: { orderBy: { occurredAt: "desc" }; take: 10 };
+      contacts: true;
+      externalIds: true;
+      documents: { take: 5; orderBy: { createdAt: "desc" } };
+    };
+  }>>>;
+  let account: AccountWithRelations | null = null;
+  let dbError: string | null = null;
+  try {
+    account = await prisma.account.findUnique({
+      where: { cmid },
+      include: {
+        activities: { orderBy: { occurredAt: "desc" }, take: 10 },
+        contacts: true,
+        externalIds: true,
+        documents: { take: 5, orderBy: { createdAt: "desc" } },
+      },
+    });
+  } catch (e) {
+    dbError = e instanceof Error ? e.message : "데이터베이스 오류";
+  }
+
+  if (dbError) {
+    return (
+      <AppShell>
+        <div className="flex flex-col items-center justify-center py-32 text-center gap-3">
+          <div className="text-4xl">⚠</div>
+          <div className="text-lg font-semibold">데이터를 불러오는 중 오류가 발생했습니다</div>
+          <div className="text-sm text-[color:var(--color-muted-foreground)]">
+            {dbError}
+          </div>
+        </div>
+      </AppShell>
+    );
+  }
 
   if (!account) {
     return (

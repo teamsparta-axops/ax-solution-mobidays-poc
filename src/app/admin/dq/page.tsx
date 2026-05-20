@@ -82,16 +82,23 @@ function ScoreGauge({ score }: { score: number }) {
 }
 
 export default async function DqPage() {
-  const [runs, latestRun, sfCount, sheetCount, accountCount, chunkCount, activityCount] =
-    await Promise.all([
-      prisma.dqRun.findMany({ orderBy: { runAt: "desc" } }),
-      prisma.dqRun.findFirst({ orderBy: { runAt: "desc" } }),
-      prisma.sfAccount.count(),
-      prisma.sheetProspect.count(),
-      prisma.account.count(),
-      prisma.docChunk.count(),
-      prisma.activity.count(),
-    ]);
+  let runs: Awaited<ReturnType<typeof prisma.dqRun.findMany>> = [];
+  let latestRun: Awaited<ReturnType<typeof prisma.dqRun.findFirst>> = null;
+  let sfCount = 0, sheetCount = 0, accountCount = 0, chunkCount = 0, activityCount = 0;
+  try {
+    [runs, latestRun, sfCount, sheetCount, accountCount, chunkCount, activityCount] =
+      await Promise.all([
+        prisma.dqRun.findMany({ orderBy: { runAt: "desc" } }),
+        prisma.dqRun.findFirst({ orderBy: { runAt: "desc" } }),
+        prisma.sfAccount.count(),
+        prisma.sheetProspect.count(),
+        prisma.account.count(),
+        prisma.docChunk.count(),
+        prisma.activity.count(),
+      ]);
+  } catch (err) {
+    console.error("DqPage DB error:", err);
+  }
 
   const totalSuites = runs.length;
   const passing = runs.filter((r) => r.status === "passed").length;
@@ -325,6 +332,14 @@ function Stat({
   );
 }
 
+function safeDisplayNumber(sv: unknown): string {
+  if (typeof sv === "number") {
+    if (!isFinite(sv) || isNaN(sv)) return "—";
+    return sv < 1 ? fmtPct(sv) : String(sv);
+  }
+  return String(sv);
+}
+
 function KV({ k, v }: { k: string; v: unknown }) {
   if (v && typeof v === "object" && !Array.isArray(v)) {
     return (
@@ -334,19 +349,18 @@ function KV({ k, v }: { k: string; v: unknown }) {
           {Object.entries(v as Record<string, unknown>).map(([sk, sv]) => (
             <div key={sk} className="flex justify-between gap-3">
               <span className="text-[color:var(--color-muted-foreground)] font-mono">{sk}</span>
-              <span className="tabular-nums">
-                {typeof sv === "number" && sv < 1 ? fmtPct(sv) : String(sv)}
-              </span>
+              <span className="tabular-nums">{safeDisplayNumber(sv)}</span>
             </div>
           ))}
         </div>
       </div>
     );
   }
+  const displayVal = typeof v === "number" && (!isFinite(v) || isNaN(v)) ? "—" : String(v);
   return (
     <div className="flex justify-between gap-3">
       <span className="text-[color:var(--color-muted-foreground)] font-mono">{k}</span>
-      <span className="tabular-nums">{String(v)}</span>
+      <span className="tabular-nums">{displayVal}</span>
     </div>
   );
 }

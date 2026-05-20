@@ -5,6 +5,7 @@ export async function embedText(text: string): Promise<number[]> {
     model: "text-embedding-3-small",
     input: text.slice(0, 8000),
   });
+  if (!res.data || res.data.length === 0) throw new Error("OpenAI returned empty embedding");
   return res.data[0].embedding;
 }
 

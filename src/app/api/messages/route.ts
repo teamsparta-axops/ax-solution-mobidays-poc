@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
 
 const Body = z.object({
   cmid: z.string(),
-  purpose: z.string(),
+  purpose: z.enum(["Invitation", "Proposal", "Reminder", "FollowUp", "PostEvent"]),
   channel: z.string().default("Email"),
   subject: z.string(),
   body: z.string(),
@@ -20,7 +20,7 @@ export async function POST(req: Request) {
   if (!parsed.success) return NextResponse.json({ error: "잘못된 요청" }, { status: 400 });
   const d = parsed.data;
   const msg = await prisma.message.create({
-    data: { id: nanoid(), cmid: d.cmid, purpose: d.purpose as any, channel: d.channel, subject: d.subject, body: d.body, status: "Draft" },
+    data: { id: nanoid(), cmid: d.cmid, purpose: d.purpose, channel: d.channel, subject: d.subject, body: d.body, status: "Draft" },
   });
   return NextResponse.json({ id: msg.id });
 }

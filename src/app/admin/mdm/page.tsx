@@ -1,5 +1,7 @@
 import Link from "next/link";
-import { AlertTriangle, GitMerge, Scissors, ShieldCheck } from "lucide-react";
+import { AlertTriangle, ShieldCheck } from "lucide-react";
+
+import { MdmActions } from "./mdm-actions";
 
 import { AppShell } from "@/components/layout/app-shell";
 import { PageHeader } from "@/components/page-header";
@@ -153,19 +155,8 @@ export default async function MdmReviewPage() {
                   </div>
                 </div>
 
-                <div className="mt-3 flex gap-2">
-                  <button className="inline-flex items-center gap-1 text-xs bg-[color:var(--color-brand-ink)] text-white px-3 h-8 rounded-md hover:bg-[color:var(--color-brand-ink-2)]">
-                    <GitMerge className="size-3" /> 병합 (Merge)
-                  </button>
-                  <button className="inline-flex items-center gap-1 text-xs border border-[color:var(--color-border)] px-3 h-8 rounded-md hover:bg-[color:var(--color-muted)]">
-                    <Scissors className="size-3" /> 분리 (New CMID)
-                  </button>
-                  <button className="inline-flex items-center gap-1 text-xs text-[color:var(--color-muted-foreground)] px-3 h-8">
-                    보류
-                  </button>
-                  <span className="ml-auto text-[10px] text-[color:var(--color-muted-foreground)] self-center">
-                    데모용 — 실제 병합은 disabled
-                  </span>
+                <div className="mt-3 flex gap-2 items-center flex-wrap">
+                  <MdmActions candidateId={c.id} />
                 </div>
               </CardBody>
             </Card>

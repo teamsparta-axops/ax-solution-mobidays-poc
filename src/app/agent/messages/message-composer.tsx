@@ -75,6 +75,7 @@ export function MessageComposer({
   const [copied, setCopied] = useState(false);
   const [saved, setSaved] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [generateError, setGenerateError] = useState<string | null>(null);
 
   const account = accounts.find((a) => a.cmid === cmid);
 
@@ -83,6 +84,7 @@ export function MessageComposer({
     setDraft(null);
     setEdited(null);
     setStatus("draft");
+    setGenerateError(null);
     try {
       const res = await fetch("/api/draft", {
         method: "POST",
@@ -93,7 +95,11 @@ export function MessageComposer({
       if (res.ok) {
         setDraft(json);
         setEdited({ subject: json.subject, body: json.body });
+      } else {
+        setGenerateError(json?.error ?? `오류가 발생했습니다 (${res.status})`);
       }
+    } catch (e) {
+      setGenerateError(e instanceof Error ? e.message : "네트워크 오류가 발생했습니다.");
     } finally {
       setLoading(false);
     }
@@ -219,6 +225,11 @@ export function MessageComposer({
               {loading ? <Loader2 className="size-4 animate-spin" /> : <Wand2 className="size-4" />}
               {loading ? "초안 생성 중…" : "AI로 초안 생성"}
             </Button>
+            {generateError && (
+              <div className="rounded-md border border-[color:var(--color-danger)] bg-[color:var(--color-danger-bg)] px-3 py-2 text-xs text-[color:var(--color-danger)]">
+                {generateError}
+              </div>
+            )}
           </CardBody>
         </Card>
 

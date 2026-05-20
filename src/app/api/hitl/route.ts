@@ -80,7 +80,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "id, type, action required" }, { status: 400 });
   }
 
-  const actor = decidedBy ?? "demo_manager";
+  const actor = decidedBy ?? "system";
 
   if (type === "mdm") {
     await prisma.mdmCandidate.update({

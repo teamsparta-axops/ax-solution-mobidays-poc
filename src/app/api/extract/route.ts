@@ -35,6 +35,10 @@ export async function POST(req: Request) {
   const pii = redactPII(cleaned);
   const stage3End = Date.now();
 
+  if (pii.redacted.trim().length < 10) {
+    return NextResponse.json({ error: "PII 마스킹 후 텍스트가 너무 짧습니다" }, { status: 400 });
+  }
+
   await delay(50);
   const fields = await extractMeetingMock(pii.redacted);
   const stage4End = Date.now();

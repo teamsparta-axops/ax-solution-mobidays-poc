@@ -1,3 +1,5 @@
+import { ClipboardList } from "lucide-react";
+
 import { AppShell } from "@/components/layout/app-shell";
 import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
@@ -33,8 +35,12 @@ export default async function AuditPage() {
       {logs.length === 0 ? (
         <Card>
           <CardBody>
-            <div className="text-sm text-[color:var(--color-muted-foreground)]">
-              아직 감사 로그가 없습니다. HITL 승인/거절 시 자동 기록됩니다.
+            <div className="flex flex-col items-center justify-center py-10 gap-3 text-center">
+              <ClipboardList className="size-10 text-[color:var(--color-muted-foreground)]" />
+              <div className="text-sm font-medium">아직 감사 로그가 없습니다.</div>
+              <div className="text-xs text-[color:var(--color-muted-foreground)]">
+                HITL 승인/거절 시 자동 기록됩니다.
+              </div>
             </div>
           </CardBody>
         </Card>

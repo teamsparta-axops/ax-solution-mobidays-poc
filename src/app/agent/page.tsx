@@ -28,27 +28,38 @@ export const dynamic = "force-dynamic";
 const STAGES = ["Identified", "Invited", "Confirmed", "Met", "Won", "Lost"] as const;
 
 export default async function AgentDashboardPage() {
-  const event = await prisma.event.findFirst({
-    orderBy: { startsAt: "asc" },
-  });
-  const accounts = await prisma.account.findMany({
-    select: {
-      cmid: true,
-      canonicalName: true,
-      industryLabel: true,
-      customerTier: true,
-      leadStage: true,
-      relationshipScore: true,
-      ownerUserId: true,
-      lastTouchedAt: true,
-    },
-  });
-  const messageStats = {
-    sent: await prisma.message.count({ where: { status: "Sent" } }),
-    pending: await prisma.message.count({ where: { status: "PendingApproval" } }),
-  };
-  const ruleExecutions = await prisma.ruleExecution.count();
-  const reviewQueue = await prisma.mdmCandidate.count({ where: { status: "pending" } });
+  let event: Awaited<ReturnType<typeof prisma.event.findFirst>> = null;
+  let accounts: Awaited<ReturnType<typeof prisma.account.findMany<{ select: { cmid: true; canonicalName: true; industryLabel: true; customerTier: true; leadStage: true; relationshipScore: true; ownerUserId: true; lastTouchedAt: true } }>>> = [];
+  let messageStats = { sent: 0, pending: 0 };
+  let ruleExecutions = 0;
+  let reviewQueue = 0;
+
+  try {
+    event = await prisma.event.findFirst({
+      orderBy: { startsAt: "asc" },
+    });
+    accounts = await prisma.account.findMany({
+      select: {
+        cmid: true,
+        canonicalName: true,
+        industryLabel: true,
+        customerTier: true,
+        leadStage: true,
+        relationshipScore: true,
+        ownerUserId: true,
+        lastTouchedAt: true,
+      },
+    });
+    messageStats = {
+      sent: await prisma.message.count({ where: { status: "Sent" } }),
+      pending: await prisma.message.count({ where: { status: "PendingApproval" } }),
+    };
+    ruleExecutions = await prisma.ruleExecution.count();
+    reviewQueue = await prisma.mdmCandidate.count({ where: { status: "pending" } });
+  } catch (err) {
+    console.error("AgentDashboardPage DB error:", err);
+    // Use defaults (empty arrays / zeros) set above
+  }
 
   // Group by leadStage for Kanban
   const byStage: Record<string, typeof accounts> = {};
@@ -69,9 +80,11 @@ export default async function AgentDashboardPage() {
   const noOwner = accounts.filter((a) => !a.ownerUserId && a.customerTier === "A").slice(0, 4);
   const invitedNoReply = accounts.filter((a) => a.leadStage === "Invited").slice(0, 4);
 
-  const daysToEvent = event
+  const daysToEventRaw = event
     ? Math.ceil((event.startsAt.getTime() - Date.now()) / (1000 * 60 * 60 * 24))
     : null;
+  const daysToEvent = daysToEventRaw !== null ? Math.max(0, daysToEventRaw) : null;
+  const eventEnded = daysToEventRaw !== null && daysToEventRaw < 0;
 
   return (
     <AppShell>
@@ -80,7 +93,7 @@ export default async function AgentDashboardPage() {
         title="Max Summit 2026 세일즈 작전 본부"
         description={
           event
-            ? `${fmtDate(event.startsAt)} 개최 — D-${daysToEvent}일 · 이벤트별 KPI · 보류 액션 · Lead Stage 칸반`
+            ? `${fmtDate(event.startsAt)} 개최 — ${eventEnded ? "행사 종료" : `D-${daysToEvent}일`} · 이벤트별 KPI · 보류 액션 · Lead Stage 칸반`
             : "행사 일정 정보 없음"
         }
         breadcrumbs={[{ href: "/", label: "홈" }, { label: "Agent 대시보드" }]}
@@ -97,7 +110,7 @@ export default async function AgentDashboardPage() {
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-8">
         <Stat
           label="D-Day"
-          value={daysToEvent ?? "—"}
+          value={daysToEvent !== null ? (eventEnded ? "종료" : daysToEvent) : "—"}
           hint={event ? `${fmtDate(event.startsAt)} 개최` : "행사 미설정"}
         />
         <Stat

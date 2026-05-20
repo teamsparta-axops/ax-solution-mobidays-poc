@@ -59,7 +59,7 @@ export async function draftMessage(input: DraftInput): Promise<DraftOutput> {
       input.sessionTitle ? `세션 제목: ${input.sessionTitle}` : null,
       input.personalTouch ? `개인화 메모: ${input.personalTouch}` : null,
     ]
-      .filter(Boolean)
+      .filter((s) => s !== undefined && s !== null)
       .join("\n");
 
     const completion = await getOpenAI().chat.completions.create({
@@ -142,7 +142,7 @@ async function draftMessageFallback(input: DraftInput): Promise<DraftOutput> {
         `${signature} 드림`,
         input.personalTouch ? `\nP.S. ${input.personalTouch}` : ``,
       ]
-        .filter((line) => line !== undefined)
+        .filter((line) => line !== undefined && line !== null)
         .join("\n");
       break;
     case "Proposal":

@@ -157,7 +157,8 @@ function detectCompanyAndAttendees(text: string): {
     // Look for "이정훈" / "박민준" — common Korean names — heuristic
     const nameRe = /([가-힣]{2,3})\s*\((당사|광고주|client|us)\)/g;
     let m;
-    while ((m = nameRe.exec(text)) !== null) {
+    let safetyLimit = 0;
+    while ((m = nameRe.exec(text)) !== null && safetyLimit++ < 50) {
       attendees.push({
         name: m[1],
         party: m[2] === "당사" || m[2] === "us" ? "us" : "client",
@@ -173,7 +174,8 @@ function detectBudget(text: string): BudgetSignal[] {
   const out: BudgetSignal[] = [];
   const eokRe = /(?:캠페인|연간|월간|분기)?\s*(?:1건당)?\s*(\d{1,4})\s*억(?:원)?/g;
   let m;
-  while ((m = eokRe.exec(text)) !== null) {
+  let safetyLimit = 0;
+  while ((m = eokRe.exec(text)) !== null && safetyLimit++ < 50) {
     const amount = Number(m[1]) * 1_0000_0000;
     out.push({
       amountKrw: amount,
@@ -192,7 +194,8 @@ function detectActions(text: string): ActionItem[] {
   const out: ActionItem[] = [];
   const re = /[-•·]\s*\((당사|광고주|client|us|both|both)\)\s*([^\n]+)/g;
   let m;
-  while ((m = re.exec(text)) !== null) {
+  let safetyLimit = 0;
+  while ((m = re.exec(text)) !== null && safetyLimit++ < 50) {
     const partyRaw = m[1];
     const desc = m[2].trim().slice(0, 200);
     out.push({

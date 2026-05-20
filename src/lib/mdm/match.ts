@@ -483,9 +483,9 @@ function computeFeatures(
     weight: FEATURE_WEIGHTS.domain,
     contribution: domainMatch * FEATURE_WEIGHTS.domain,
     evidence: domainMatch
-      ? `도메인 eTLD+1 일치 (${recDomain})`
+      ? `도메인 eTLD+1 일치 (${recDomain ?? ""})`
       : recDomain
-        ? `도메인 불일치 (${recDomain} ≠ ${cand.domainRoot ?? "—"})`
+        ? `도메인 불일치 (${recDomain ?? ""} ≠ ${cand.domainRoot ?? "—"})`
         : `소스 도메인 없음`,
   });
 
@@ -541,7 +541,7 @@ function computeFeatures(
     weight: FEATURE_WEIGHTS.contactSignal,
     contribution: contactMatch * FEATURE_WEIGHTS.contactSignal,
     evidence: contactMatch
-      ? `이메일 도메인 일치 (${contactDomain})`
+      ? `이메일 도메인 일치 (${contactDomain ?? ""})`
       : `이메일 도메인 정보 없음 또는 불일치`,
   });
 

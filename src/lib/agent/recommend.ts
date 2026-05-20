@@ -131,8 +131,9 @@ export async function runRecommendations(
     // Budget fit
     if (
       a.marketingBudgetKrw != null &&
-      req.filters.budgetMinKrw &&
-      Number(a.marketingBudgetKrw) >= req.filters.budgetMinKrw
+      req.filters.budgetMinKrw != null &&
+      req.filters.budgetMinKrw > 0 &&
+      a.marketingBudgetKrw >= BigInt(req.filters.budgetMinKrw)
     ) {
       ruleScore += RULE_WEIGHTS.budget;
       reasons.push({
@@ -184,9 +185,9 @@ export async function runRecommendations(
       let hit = 0;
       const evidenceLines: string[] = [];
       for (const act of a.activities) {
-        const text = `${act.subject ?? ""} ${act.body ?? ""}`;
+        const text = `${act.subject ?? ""} ${act.body ?? ""}`.toLowerCase();
         for (const t of topics) {
-          if (text.includes(t)) {
+          if (text.includes(t.toLowerCase())) {
             hit++;
             evidenceLines.push(
               `${formatDate(act.occurredAt)} 미팅에서 "${t}" 언급`,

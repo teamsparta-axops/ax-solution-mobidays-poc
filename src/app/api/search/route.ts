@@ -126,7 +126,7 @@ export async function POST(req: Request) {
       sourceType: chunk.document.sourceType,
       cmid: chunk.document.cmid ?? null,
       score: Math.round(score * 10000) / 10000,
-      excerpt: chunk.text.slice(0, 200),
+      highlight: chunk.text.slice(0, 200),
       topics,
     };
   });

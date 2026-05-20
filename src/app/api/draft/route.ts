@@ -55,7 +55,10 @@ export async function POST(req: Request) {
   });
   // Extract unique topics from chunks
   const chunkTopics = [...new Set(
-    docChunks.flatMap(c => { try { return JSON.parse(c.topicsJson) as string[]; } catch { return []; } })
+    docChunks.flatMap(c => {
+      if (!c.topicsJson) return [];
+      try { return JSON.parse(c.topicsJson) as string[]; } catch { return []; }
+    })
   )].slice(0, 5);
 
   const activityTopics: string[] = lastActivity

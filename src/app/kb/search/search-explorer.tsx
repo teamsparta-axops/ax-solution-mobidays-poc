@@ -117,7 +117,7 @@ export function SearchExplorer() {
     }
   }
 
-  const maxScore = results && results.length > 0 ? results[0].score : 1;
+  const maxScore = results && results.length > 0 ? (results[0].score > 0 ? results[0].score : 1) : 1;
 
   return (
     <div className="space-y-6">
@@ -224,7 +224,7 @@ export function SearchExplorer() {
                       <div className="h-1 rounded-full bg-[color:var(--color-muted)]">
                         <div
                           className="h-1 rounded-full bg-[color:var(--color-brand-ink)] transition-all"
-                          style={{ width: `${Math.min(100, (r.score / maxScore) * 100)}%` }}
+                          style={{ width: `${Math.min(100, maxScore > 0 ? (r.score / maxScore) * 100 : 0)}%` }}
                         />
                       </div>
                     </div>
@@ -240,7 +240,7 @@ export function SearchExplorer() {
 
                     {/* Highlight */}
                     <p className="text-sm text-[color:var(--color-muted-foreground)] leading-relaxed line-clamp-3">
-                      <HighlightText text={r.highlight} />
+                      <HighlightText text={r.highlight ?? ""} />
                     </p>
                   </div>
                 ))}

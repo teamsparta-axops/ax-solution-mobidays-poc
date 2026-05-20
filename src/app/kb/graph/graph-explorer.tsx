@@ -195,6 +195,10 @@ export function GraphExplorer() {
                   <div className="absolute inset-0 flex items-center justify-center text-sm text-[color:var(--color-muted-foreground)]">
                     데이터 없음
                   </div>
+                ) : !loading && !fetchFailed && nodes.length === 0 ? (
+                  <div className="absolute inset-0 flex items-center justify-center text-sm text-[color:var(--color-muted-foreground)] text-center px-8">
+                    연결된 계정 데이터가 없습니다. /admin/seed 에서 데이터를 초기화하세요.
+                  </div>
                 ) : (
                   <>
                 {/* Cluster background shapes */}
