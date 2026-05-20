@@ -13,6 +13,7 @@ const BodySchema = z.object({
   channel: z.enum(["email", "kakao", "sms"]).optional(),
   tone: z.enum(["formal", "friendly", "concise"]).default("formal"),
   sessionId: z.string().optional(),
+  variants: z.number().optional(),
 });
 
 export async function POST(req: Request) {
@@ -66,37 +67,95 @@ export async function POST(req: Request) {
     : [];
   const mergedTopics = [...new Set([...activityTopics, ...chunkTopics])];
 
-  const draft = await draftMessage({
+  // Fetch recent activities (up to 5) for rich context
+  const recentActivities = await prisma.activity.findMany({
+    where: { cmid: body.cmid },
+    orderBy: { occurredAt: "desc" },
+    take: 5,
+    select: { type: true, subject: true, bodySummary: true, occurredAt: true, topicsJson: true },
+  });
+
+  // Fetch latest relationship score
+  const relScoreRow = await prisma.relationshipScore.findFirst({
+    where: { cmid: body.cmid },
+    orderBy: { snapshotAt: "desc" },
+    select: { score: true, factorsJson: true },
+  });
+  const relationshipScore = relScoreRow?.score !== undefined ? relScoreRow.score : undefined;
+
+  const baseInput = {
     purpose: body.purpose,
     accountName: account.canonicalName,
     contactName: primaryContact?.fullName,
     contactTitle: primaryContact?.title ?? undefined,
-    tone: body.tone,
     topics: mergedTopics,
     sessionTitle,
     personalTouch: lastActivity?.bodySummary ?? undefined,
-  });
+    recentActivities: recentActivities.map((a) => ({
+      type: a.type,
+      subject: a.subject ?? undefined,
+      bodySummary: a.bodySummary ?? undefined,
+      occurredAt: a.occurredAt,
+    })),
+    relationshipScore,
+  };
+
+  // Always generate 2 variants: formal + friendly
+  const [v1, v2] = await Promise.all([
+    draftMessage({ ...baseInput, tone: "formal" }),
+    draftMessage({ ...baseInput, tone: "friendly" }),
+  ]);
 
   const contactEmail = primaryContact?.email ?? null;
-  const gmailHref = contactEmail
-    ? "mailto:" + encodeURIComponent(contactEmail) + "?subject=" + encodeURIComponent(draft.subject) + "&body=" + encodeURIComponent(draft.body)
-    : undefined;
+
+  function buildHref(subject: string, bodyText: string): string | undefined {
+    if (!contactEmail) return undefined;
+    return (
+      "mailto:" +
+      encodeURIComponent(contactEmail) +
+      "?subject=" +
+      encodeURIComponent(subject) +
+      "&body=" +
+      encodeURIComponent(bodyText)
+    );
+  }
+
+  const variables = {
+    accountName: account.canonicalName,
+    contactName: primaryContact?.fullName ?? "",
+    contactTitle: primaryContact?.title ?? "",
+    lastActivitySubject: lastActivity?.subject ?? "",
+    marketingBudgetKrw: account.marketingBudgetKrw?.toString() ?? "",
+    leadStage: account.leadStage ?? "",
+    channel: body.channel ?? "email",
+    relationshipScore: relationshipScore?.toString() ?? "",
+    ...v1.variables,
+  };
+
+  // Merge evidence from both variants (deduplicated by text)
+  const evidenceMap = new Map<string, { type: string; text: string }>();
+  for (const e of [...v1.evidence, ...v2.evidence]) {
+    if (!evidenceMap.has(e.text)) evidenceMap.set(e.text, e);
+  }
+  const evidence = Array.from(evidenceMap.values());
 
   return NextResponse.json({
-    subject: draft.subject,
-    body: draft.body,
-    variables: {
-      accountName: account.canonicalName,
-      contactName: primaryContact?.fullName ?? "",
-      contactTitle: primaryContact?.title ?? "",
-      lastActivitySubject: lastActivity?.subject ?? "",
-      marketingBudgetKrw: account.marketingBudgetKrw?.toString() ?? "",
-      leadStage: account.leadStage ?? "",
-      channel: body.channel ?? "email",
-      ...draft.variables,
-    },
-    evidence: draft.evidence,
-    gmailHref,
+    variants: [
+      {
+        tone: "formal",
+        subject: v1.subject,
+        body: v1.body,
+        gmailHref: buildHref(v1.subject, v1.body),
+      },
+      {
+        tone: "friendly",
+        subject: v2.subject,
+        body: v2.body,
+        gmailHref: buildHref(v2.subject, v2.body),
+      },
+    ],
+    variables,
+    evidence,
     contactEmail,
   });
 }

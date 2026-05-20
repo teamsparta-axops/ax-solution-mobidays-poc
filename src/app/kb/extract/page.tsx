@@ -1,5 +1,6 @@
 import { AppShell } from "@/components/layout/app-shell";
 import { PageHeader } from "@/components/page-header";
+import { prisma } from "@/lib/db";
 import { ExtractDemo } from "./extract-demo";
 
 export const dynamic = "force-dynamic";
@@ -26,7 +27,12 @@ const SAMPLE_MEETING = `# 네오플라잇 정기 미팅 — Skyborne 글로벌 �
 김재훈 매니저 휴대폰 010-1234-9921, 이메일 jh.kim@neoflight.demo
 `;
 
-export default function ExtractPage() {
+export default async function ExtractPage() {
+  const accounts = await prisma.account.findMany({
+    select: { cmid: true, canonicalName: true },
+    orderBy: { canonicalName: "asc" },
+  });
+
   return (
     <AppShell>
       <PageHeader
@@ -39,7 +45,7 @@ export default function ExtractPage() {
           { label: "비정형 처리" },
         ]}
       />
-      <ExtractDemo sampleText={SAMPLE_MEETING} />
+      <ExtractDemo sampleText={SAMPLE_MEETING} accounts={accounts} />
     </AppShell>
   );
 }

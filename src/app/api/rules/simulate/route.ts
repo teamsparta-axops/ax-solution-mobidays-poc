@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { prisma } from "@/lib/db";
@@ -19,20 +18,27 @@ export async function POST(req: Request) {
   try {
     body = BodySchema.parse(await req.json());
   } catch (e: unknown) {
-    return NextResponse.json(
-      { error: e instanceof Error ? e.message : "잘못된 요청" },
-      { status: 400 },
-    );
+    return new Response(JSON.stringify({ error: e instanceof Error ? e.message : "잘못된 요청" }), {
+      status: 400,
+      headers: { "Content-Type": "application/json" },
+    });
   }
 
   let yamlText: string | undefined = body.yaml;
   if (!yamlText && body.ruleId) {
     const r = await prisma.ruleDefinition.findUnique({ where: { id: body.ruleId } });
-    if (!r) return NextResponse.json({ error: "rule not found" }, { status: 404 });
+    if (!r)
+      return new Response(JSON.stringify({ error: "rule not found" }), {
+        status: 404,
+        headers: { "Content-Type": "application/json" },
+      });
     yamlText = r.yaml;
   }
   if (!yamlText) {
-    return NextResponse.json({ error: "yaml 또는 ruleId 중 하나가 필요합니다" }, { status: 400 });
+    return new Response(
+      JSON.stringify({ error: "yaml 또는 ruleId 중 하나가 필요합니다" }),
+      { status: 400, headers: { "Content-Type": "application/json" } },
+    );
   }
 
   const accounts = await prisma.account.findMany({
@@ -46,48 +52,59 @@ export async function POST(req: Request) {
     },
   });
 
-  const before: Record<string, string | null> = {};
-  for (const a of accounts) before[a.cmid] = a.customerTier;
+  const capturedYaml = yamlText;
+  const encoder = new TextEncoder();
 
-  const results = [];
-  for (const a of accounts) {
-    const r = await runRule(yamlText, { cmid: a.cmid }, {
-      trigger: "simulate",
-      dryRun: true,
-    });
-    results.push({
-      cmid: a.cmid,
-      canonicalName: a.canonicalName,
-      industry: a.industryLabel,
-      currentTier: a.customerTier,
-      decision: r.decision,
-      latencyMs: r.latencyMs,
-    });
-  }
+  const stream = new ReadableStream({
+    async start(controller) {
+      const emit = (data: object) =>
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
 
-  const distribution: Record<string, number> = {};
-  const changes: { cmid: string; name: string; from: string | null; to: unknown }[] = [];
-  for (const r of results) {
-    const newTier =
-      typeof r.decision === "object" && r.decision !== null
-        ? (r.decision as Record<string, unknown>).customer_tier
-        : null;
-    const tierKey = newTier ? String(newTier) : "?";
-    distribution[tierKey] = (distribution[tierKey] ?? 0) + 1;
-    if (newTier && newTier !== r.currentTier) {
-      changes.push({
-        cmid: r.cmid,
-        name: r.canonicalName,
-        from: r.currentTier,
-        to: newTier,
-      });
-    }
-  }
+      let processed = 0;
+      const distribution: Record<string, number> = {};
+      const changes: unknown[] = [];
 
-  return NextResponse.json({
-    total: results.length,
-    distribution,
-    changes,
-    sample: results.slice(0, 12),
+      emit({ type: "start", total: accounts.length });
+
+      for (const a of accounts) {
+        const r = await runRule(capturedYaml, { cmid: a.cmid }, { trigger: "simulate", dryRun: true });
+        processed++;
+        const newTier =
+          (r.decision as Record<string, unknown> | null)?.customer_tier as string | null ?? null;
+        const tierKey = newTier ?? "변화없음";
+        distribution[tierKey] = (distribution[tierKey] ?? 0) + 1;
+        const changed = Boolean(newTier && newTier !== a.customerTier);
+        if (changed)
+          changes.push({
+            cmid: a.cmid,
+            name: a.canonicalName,
+            industry: a.industryLabel,
+            from: a.customerTier,
+            to: newTier,
+            latencyMs: r.latencyMs,
+          });
+
+        emit({
+          type: "progress",
+          processed,
+          total: accounts.length,
+          cmid: a.cmid,
+          name: a.canonicalName,
+          decision: r.decision,
+          latencyMs: r.latencyMs,
+          changed,
+        });
+      }
+
+      emit({ type: "complete", total: accounts.length, distribution, changes });
+      controller.close();
+    },
+  });
+
+  return new Response(stream, {
+    headers: {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+    },
   });
 }

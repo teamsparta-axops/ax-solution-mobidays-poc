@@ -19,6 +19,8 @@ export interface DraftInput {
   sessionTitle?: string;
   personalTouch?: string;
   signature?: string;
+  recentActivities?: { type: string; subject?: string; bodySummary?: string; occurredAt: Date }[];
+  relationshipScore?: number;
 }
 
 export interface DraftOutput {
@@ -26,6 +28,10 @@ export interface DraftOutput {
   body: string;
   variables: Record<string, string>;
   evidence: { type: string; text: string }[];
+}
+
+function formatDate(d: Date): string {
+  return `${d.getFullYear()}년 ${d.getMonth() + 1}월 ${d.getDate()}일`;
 }
 
 export async function draftMessage(input: DraftInput): Promise<DraftOutput> {
@@ -39,15 +45,40 @@ export async function draftMessage(input: DraftInput): Promise<DraftOutput> {
         : "간결";
     const signature = input.signature ?? "모비데이즈 세일즈 / 이지원";
 
+    const relScore = input.relationshipScore;
+    const relToneHint =
+      relScore !== undefined
+        ? relScore >= 70
+          ? "관계 강도가 높으므로 친밀하고 편안한 어조를 사용하세요."
+          : relScore <= 50
+          ? "관계 초기이므로 정중하고 격식 있는 소개 어조를 사용하세요."
+          : "중간 관계이므로 정중하되 부드러운 어조를 사용하세요."
+        : "";
+
     const systemPrompt = `당신은 모비데이즈 세일즈 담당자입니다. 광고주에게 보낼 한국어 비즈니스 이메일을 작성합니다.
 - 톤: ${tone}=${toneDesc}
 - 길이: 본문 150-250자 (concise는 100자 이내)
 - 서명: 모비데이즈 세일즈 / ${signature}
+- 최근 접점 히스토리를 반드시 1-2문장 안에 자연스럽게 인용하세요 (예: "지난 X월 미팅에서 말씀하신...")
+- 관계 강도가 70+ 이면 친밀한 어조, 50 이하면 정중한 소개 어조
+- 특정 KPI나 예산 수치가 있으면 구체적으로 언급하세요
+${relToneHint ? `- ${relToneHint}` : ""}
 응답은 반드시 JSON으로만: {"subject": "...", "body": "..."}`;
 
     const nameWithTitle = input.contactTitle
       ? `${input.contactName ?? "담당자"} ${input.contactTitle}`
       : `${input.contactName ?? "담당자"}`;
+
+    const activityLines =
+      input.recentActivities && input.recentActivities.length > 0
+        ? input.recentActivities
+            .slice(0, 3)
+            .map(
+              (a) =>
+                `- ${a.type} (${formatDate(a.occurredAt)}): ${a.subject ?? ""} ${a.bodySummary ?? ""}`,
+            )
+            .join("\n")
+        : "없음";
 
     const userPrompt = [
       `목적: ${input.purpose}`,
@@ -58,6 +89,8 @@ export async function draftMessage(input: DraftInput): Promise<DraftOutput> {
         : null,
       input.sessionTitle ? `세션 제목: ${input.sessionTitle}` : null,
       input.personalTouch ? `개인화 메모: ${input.personalTouch}` : null,
+      `최근 접점 히스토리:\n${activityLines}`,
+      `관계 강도: ${relScore ?? "미측정"}/100`,
     ]
       .filter((s) => s !== undefined && s !== null)
       .join("\n");
@@ -78,6 +111,23 @@ export async function draftMessage(input: DraftInput): Promise<DraftOutput> {
     const subject = parsed.subject ?? "";
     const body = parsed.body ?? "";
 
+    const evidence: { type: string; text: string }[] = [];
+    if (input.personalTouch) {
+      evidence.push({ type: "activity_history", text: input.personalTouch.slice(0, 200) });
+    } else if (input.topics && input.topics.length > 0) {
+      evidence.push({ type: "session_match", text: `요청 주제: ${input.topics.join(", ")}` });
+    }
+    if (relScore !== undefined) {
+      evidence.push({ type: "relationship", text: `관계 강도 ${relScore}/100` });
+    }
+    if (input.recentActivities && input.recentActivities.length > 0) {
+      const latest = input.recentActivities[0];
+      evidence.push({
+        type: "activity_history",
+        text: `최근 접점: ${latest.type} (${formatDate(latest.occurredAt)}) ${latest.subject ?? ""}`.trim(),
+      });
+    }
+
     return {
       subject,
       body,
@@ -87,15 +137,9 @@ export async function draftMessage(input: DraftInput): Promise<DraftOutput> {
         contact_title: input.contactTitle ?? "",
         first_topic: input.topics?.[0] ?? "",
         session_title: input.sessionTitle ?? "",
+        relationship_score: relScore?.toString() ?? "",
       },
-      evidence: [
-        input.personalTouch
-          ? { type: "meeting_note", text: input.personalTouch.slice(0, 200) }
-          : {
-              type: "topic_match",
-              text: `요청 주제: ${input.topics?.join(", ") ?? "—"}`,
-            },
-      ],
+      evidence,
     };
   } catch {
     return draftMessageFallback(input);
@@ -197,6 +241,18 @@ async function draftMessageFallback(input: DraftInput): Promise<DraftOutput> {
       break;
   }
 
+  const evidence: { type: string; text: string }[] = [
+    input.personalTouch
+      ? { type: "activity_history", text: input.personalTouch.slice(0, 200) }
+      : {
+          type: "session_match",
+          text: `요청 주제: ${input.topics?.join(", ") ?? "—"}`,
+        },
+  ];
+  if (input.relationshipScore !== undefined) {
+    evidence.push({ type: "relationship", text: `관계 강도 ${input.relationshipScore}/100` });
+  }
+
   return {
     subject,
     body,
@@ -206,14 +262,8 @@ async function draftMessageFallback(input: DraftInput): Promise<DraftOutput> {
       contact_title: input.contactTitle ?? "",
       first_topic: input.topics?.[0] ?? "",
       session_title: input.sessionTitle ?? "",
+      relationship_score: input.relationshipScore?.toString() ?? "",
     },
-    evidence: [
-      input.personalTouch
-        ? { type: "meeting_note", text: input.personalTouch.slice(0, 200) }
-        : {
-            type: "topic_match",
-            text: `요청 주제: ${input.topics?.join(", ") ?? "—"}`,
-          },
-    ],
+    evidence,
   };
 }

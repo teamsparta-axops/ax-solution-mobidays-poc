@@ -4,6 +4,7 @@ import { useState } from "react";
 import {
   Check,
   CheckCircle,
+  ChevronDown,
   Copy,
   Loader2,
   Mail,
@@ -12,6 +13,7 @@ import {
   Send,
   Sparkles,
   Wand2,
+  Zap,
 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -30,12 +32,18 @@ interface Session {
   title: string;
   track: string | null;
 }
-interface Draft {
+
+interface Variant {
+  tone: string;
   subject: string;
   body: string;
+  gmailHref?: string;
+}
+
+interface Draft {
+  variants: Variant[];
   variables: Record<string, string>;
   evidence: { type: string; text: string }[];
-  gmailHref?: string;
   contactEmail?: string;
 }
 
@@ -47,6 +55,31 @@ const PURPOSE_OPTIONS = [
   { value: "PostEvent", label: "행사 후" },
 ] as const;
 type Purpose = (typeof PURPOSE_OPTIONS)[number]["value"];
+
+const EVIDENCE_COLORS: Record<string, string> = {
+  budget_signal: "bg-green-100 text-green-800 border-green-200",
+  activity_history: "bg-blue-100 text-blue-800 border-blue-200",
+  relationship: "bg-purple-100 text-purple-800 border-purple-200",
+  session_match: "bg-lime-100 text-lime-800 border-lime-200",
+  meeting_note: "bg-blue-100 text-blue-800 border-blue-200",
+  topic_match: "bg-lime-100 text-lime-800 border-lime-200",
+};
+
+function highlightVariables(text: string, variables: Record<string, string>): string {
+  let result = text;
+  for (const val of Object.values(variables)) {
+    if (!val || val.length < 2) continue;
+    try {
+      result = result.replace(
+        new RegExp(val.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g"),
+        `<mark class="bg-yellow-200 rounded px-0.5">$&</mark>`,
+      );
+    } catch {
+      // skip invalid regex
+    }
+  }
+  return result;
+}
 
 export function MessageComposer({
   accounts,
@@ -70,12 +103,17 @@ export function MessageComposer({
 
   const [loading, setLoading] = useState(false);
   const [draft, setDraft] = useState<Draft | null>(null);
+  const [selectedVariant, setSelectedVariant] = useState<0 | 1>(0);
   const [edited, setEdited] = useState<{ subject: string; body: string } | null>(null);
   const [status, setStatus] = useState<"draft" | "pending" | "approved" | "sent">("draft");
   const [copied, setCopied] = useState(false);
   const [saved, setSaved] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [savedMessageId, setSavedMessageId] = useState<string | null>(null);
   const [generateError, setGenerateError] = useState<string | null>(null);
+  const [evidenceOpen, setEvidenceOpen] = useState(false);
+  const [showHighlight, setShowHighlight] = useState(false);
+  const [actionItemStatus, setActionItemStatus] = useState<"idle" | "loading" | "done" | "error">("idle");
 
   const account = accounts.find((a) => a.cmid === cmid);
 
@@ -85,16 +123,20 @@ export function MessageComposer({
     setEdited(null);
     setStatus("draft");
     setGenerateError(null);
+    setSaved(false);
+    setSavedMessageId(null);
+    setActionItemStatus("idle");
     try {
       const res = await fetch("/api/draft", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ cmid, purpose, tone, sessionId: sessionId || undefined }),
       });
-      const json = await res.json();
-      if (res.ok) {
+      const json = await res.json() as Draft & { error?: string };
+      if (res.ok && json.variants) {
         setDraft(json);
-        setEdited({ subject: json.subject, body: json.body });
+        setSelectedVariant(0);
+        setEdited({ subject: json.variants[0].subject, body: json.variants[0].body });
       } else {
         setGenerateError(json?.error ?? `오류가 발생했습니다 (${res.status})`);
       }
@@ -103,6 +145,13 @@ export function MessageComposer({
     } finally {
       setLoading(false);
     }
+  };
+
+  const onSelectVariant = (idx: 0 | 1) => {
+    if (!draft) return;
+    setSelectedVariant(idx);
+    setEdited({ subject: draft.variants[idx].subject, body: draft.variants[idx].body });
+    setSaved(false);
   };
 
   const copyBody = async () => {
@@ -116,7 +165,7 @@ export function MessageComposer({
     if (!edited) return;
     setSaving(true);
     try {
-      await fetch("/api/messages", {
+      const res = await fetch("/api/messages", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
@@ -127,20 +176,52 @@ export function MessageComposer({
           body: edited.body,
         }),
       });
+      const json = await res.json() as { id?: string };
       setSaved(true);
+      if (json.id) setSavedMessageId(json.id);
       setTimeout(() => setSaved(false), 2000);
     } finally {
       setSaving(false);
     }
   };
 
-  const gmailUrl = edited && account
-    ? buildGmailComposeUrl({
-        to: account.contacts[0]?.email ?? "",
-        subject: edited.subject,
-        body: edited.body,
-      })
-    : null;
+  const createActionItem = async () => {
+    setActionItemStatus("loading");
+    try {
+      const dueBy = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+      const res = await fetch("/api/actions/create", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          cmid,
+          actionType: "SendInvite",
+          reason: "메시지 초안 승인 후 발송 필요",
+          priority: 2,
+          dueBy,
+          linkedMessageId: savedMessageId ?? undefined,
+        }),
+      });
+      if (res.ok) {
+        setActionItemStatus("done");
+      } else {
+        setActionItemStatus("error");
+      }
+    } catch {
+      setActionItemStatus("error");
+    }
+  };
+
+  const currentVariant = draft?.variants[selectedVariant];
+  const gmailHref = currentVariant?.gmailHref ?? null;
+
+  const gmailUrl =
+    edited && account
+      ? buildGmailComposeUrl({
+          to: account.contacts[0]?.email ?? "",
+          subject: edited.subject,
+          body: edited.body,
+        })
+      : null;
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
@@ -189,7 +270,7 @@ export function MessageComposer({
               </div>
             </Field>
 
-            <Field label="톤">
+            <Field label="톤 (참고용 — 격식/친근 2종 자동 생성)">
               <div className="grid grid-cols-3 gap-1.5">
                 {["formal", "friendly", "concise"].map((t) => (
                   <button
@@ -223,7 +304,7 @@ export function MessageComposer({
 
             <Button onClick={onGenerate} disabled={loading} className="w-full">
               {loading ? <Loader2 className="size-4 animate-spin" /> : <Wand2 className="size-4" />}
-              {loading ? "초안 생성 중…" : "AI로 초안 생성"}
+              {loading ? "초안 생성 중…" : "AI로 초안 생성 (2종)"}
             </Button>
             {generateError && (
               <div className="rounded-md border border-[color:var(--color-danger)] bg-[color:var(--color-danger-bg)] px-3 py-2 text-xs text-[color:var(--color-danger)]">
@@ -284,7 +365,7 @@ export function MessageComposer({
               <div>
                 <div className="font-semibold tracking-tight">왼쪽에서 [AI로 초안 생성]</div>
                 <div className="text-xs text-white/70 mt-0.5">
-                  대상 광고주 · 용도 · 톤을 선택하면 초안이 자동 생성됩니다.
+                  대상 광고주 · 용도 · 톤을 선택하면 격식/친근 2종 초안이 자동 생성됩니다.
                 </div>
               </div>
             </CardBody>
@@ -295,9 +376,9 @@ export function MessageComposer({
             <CardBody className="flex items-center gap-3">
               <Loader2 className="size-5 animate-spin" />
               <div>
-                <div className="font-medium text-sm">LLM 호출 중…</div>
+                <div className="font-medium text-sm">LLM 호출 중… (격식/친근 2종 병렬 생성)</div>
                 <div className="text-xs text-[color:var(--color-muted-foreground)]">
-                  Mock 모드: 결정론적 응답을 약 0.9초 후 반환.
+                  관계 히스토리 · 예산 · 접점 데이터를 반영합니다.
                 </div>
               </div>
             </CardBody>
@@ -306,13 +387,44 @@ export function MessageComposer({
 
         {edited && draft && (
           <>
+            {/* Variant tabs */}
+            <div className="flex gap-2">
+              {draft.variants.map((v, idx) => (
+                <button
+                  key={v.tone}
+                  onClick={() => onSelectVariant(idx as 0 | 1)}
+                  className={cn(
+                    "px-4 py-1.5 rounded-t-md text-sm font-medium border border-b-0 border-[color:var(--color-border)] transition",
+                    selectedVariant === idx
+                      ? "bg-white text-[color:var(--color-brand-ink)] border-[color:var(--color-brand-ink)]"
+                      : "bg-[color:var(--color-muted)] text-[color:var(--color-muted-foreground)] hover:bg-white",
+                  )}
+                >
+                  {v.tone === "formal" ? "격식체" : "친근체"}
+                </button>
+              ))}
+            </div>
+
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center justify-between">
-                  <span>이메일 초안</span>
-                  <Badge tone={status === "sent" ? "success" : status === "approved" ? "info" : "neutral"}>
-                    {status === "draft" ? "초안" : status === "pending" ? "승인 대기" : status === "approved" ? "승인 완료" : "발송 완료"}
-                  </Badge>
+                  <span>이메일 초안 — {draft.variants[selectedVariant]?.tone === "formal" ? "격식체" : "친근체"}</span>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => setShowHighlight((v) => !v)}
+                      className={cn(
+                        "text-xs px-2 py-1 rounded border transition",
+                        showHighlight
+                          ? "bg-yellow-100 border-yellow-300 text-yellow-800"
+                          : "border-[color:var(--color-border)] text-[color:var(--color-muted-foreground)]",
+                      )}
+                    >
+                      변수 하이라이트
+                    </button>
+                    <Badge tone={status === "sent" ? "success" : status === "approved" ? "info" : "neutral"}>
+                      {status === "draft" ? "초안" : status === "pending" ? "승인 대기" : status === "approved" ? "승인 완료" : "발송 완료"}
+                    </Badge>
+                  </div>
                 </CardTitle>
               </CardHeader>
               <CardBody className="space-y-3">
@@ -330,12 +442,61 @@ export function MessageComposer({
                   <div className="text-[10px] uppercase tracking-wider text-[color:var(--color-muted-foreground)] mb-1 font-medium">
                     본문
                   </div>
-                  <textarea
-                    value={edited.body}
-                    onChange={(e) => setEdited({ ...edited, body: e.target.value })}
-                    rows={16}
-                    className="w-full p-3 border rounded-md border-[color:var(--color-border)] text-sm focus:outline-none focus:ring-2 focus:ring-[color:var(--color-brand-ink)]/15 leading-relaxed"
-                  />
+                  {showHighlight ? (
+                    <div className="grid grid-cols-1 gap-2">
+                      <div
+                        className="w-full p-3 border rounded-md border-yellow-300 bg-yellow-50 text-sm leading-relaxed whitespace-pre-wrap"
+                        dangerouslySetInnerHTML={{
+                          __html: highlightVariables(edited.body, draft.variables),
+                        }}
+                      />
+                      <textarea
+                        value={edited.body}
+                        onChange={(e) => setEdited({ ...edited, body: e.target.value })}
+                        rows={10}
+                        className="w-full p-3 border rounded-md border-[color:var(--color-border)] text-sm focus:outline-none focus:ring-2 focus:ring-[color:var(--color-brand-ink)]/15 leading-relaxed"
+                      />
+                    </div>
+                  ) : (
+                    <textarea
+                      value={edited.body}
+                      onChange={(e) => setEdited({ ...edited, body: e.target.value })}
+                      rows={16}
+                      className="w-full p-3 border rounded-md border-[color:var(--color-border)] text-sm focus:outline-none focus:ring-2 focus:ring-[color:var(--color-brand-ink)]/15 leading-relaxed"
+                    />
+                  )}
+                </div>
+
+                {/* Evidence chain */}
+                <div className="rounded-md border border-[color:var(--color-border)]">
+                  <button
+                    onClick={() => setEvidenceOpen((v) => !v)}
+                    className="w-full flex items-center justify-between px-3 py-2 text-xs font-medium text-[color:var(--color-foreground)]/80 hover:bg-[color:var(--color-muted)] transition rounded-md"
+                  >
+                    <span className="flex items-center gap-1.5">
+                      <Sparkles className="size-3.5" /> 근거 출처 ({draft.evidence.length}건)
+                    </span>
+                    <ChevronDown className={cn("size-3.5 transition-transform", evidenceOpen && "rotate-180")} />
+                  </button>
+                  {evidenceOpen && (
+                    <div className="px-3 pb-3 space-y-1.5">
+                      {draft.evidence.map((e, i) => (
+                        <div key={i} className="flex items-start gap-2 text-xs">
+                          <span
+                            className={cn(
+                              "shrink-0 px-1.5 py-0.5 rounded border text-[10px] font-semibold uppercase tracking-wide",
+                              EVIDENCE_COLORS[e.type] ?? "bg-gray-100 text-gray-700 border-gray-200",
+                            )}
+                          >
+                            {e.type}
+                          </span>
+                          <span className="text-[color:var(--color-muted-foreground)] italic">
+                            &ldquo;{e.text}&rdquo;
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
 
                 <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-[color:var(--color-border)]">
@@ -343,10 +504,10 @@ export function MessageComposer({
                     {copied ? <Check className="size-4" /> : <Copy className="size-4" />}
                     {copied ? "복사됨" : "복사"}
                   </Button>
-                  {draft?.gmailHref ? (
+                  {gmailHref ? (
                     <Button
                       variant="outline"
-                      onClick={() => window.open(draft.gmailHref, "_blank")}
+                      onClick={() => window.open(gmailHref, "_blank")}
                     >
                       <Mail className="size-4" /> Gmail로 열기
                     </Button>
@@ -384,17 +545,38 @@ export function MessageComposer({
                     <Badge tone="success">발송 완료 → 활동 로그 기록됨</Badge>
                   )}
                 </div>
+
+                {/* Auto ActionItem creation */}
+                <div className="pt-2 border-t border-[color:var(--color-border)] flex items-center gap-3">
+                  <Button
+                    variant="outline"
+                    onClick={createActionItem}
+                    disabled={actionItemStatus === "loading" || actionItemStatus === "done"}
+                  >
+                    <Zap className="size-4" />
+                    {actionItemStatus === "loading"
+                      ? "생성 중…"
+                      : actionItemStatus === "done"
+                      ? "✓ 다음 액션 목록에 추가됨"
+                      : "액션 아이템 생성"}
+                  </Button>
+                  {actionItemStatus === "error" && (
+                    <span className="text-xs text-[color:var(--color-danger)]">
+                      액션 아이템 생성 실패. 다시 시도해주세요.
+                    </span>
+                  )}
+                </div>
               </CardBody>
             </Card>
 
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
-                  <Sparkles className="size-4" /> 변수 & 근거
+                  <Sparkles className="size-4" /> 변수 & 데이터 컨텍스트
                 </CardTitle>
               </CardHeader>
               <CardBody>
-                <div className="grid grid-cols-2 md:grid-cols-3 gap-2 text-xs mb-3">
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-2 text-xs">
                   {Object.entries(draft.variables).map(([k, v]) => (
                     <div
                       key={k}
@@ -404,17 +586,6 @@ export function MessageComposer({
                         {k}
                       </div>
                       <div className="font-mono mt-0.5">{v || "—"}</div>
-                    </div>
-                  ))}
-                </div>
-                <div className="text-xs space-y-1">
-                  {draft.evidence.map((e, i) => (
-                    <div
-                      key={i}
-                      className="border-l-2 border-[color:var(--color-brand-lime)] pl-2 text-[color:var(--color-muted-foreground)] italic"
-                    >
-                      <Badge tone="neutral" className="mr-1.5">{e.type}</Badge>
-                      &ldquo;{e.text}&rdquo;
                     </div>
                   ))}
                 </div>

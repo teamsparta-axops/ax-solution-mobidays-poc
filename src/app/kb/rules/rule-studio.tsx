@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
   CheckCircle2,
@@ -11,6 +11,7 @@ import {
   PlayCircle,
   Sparkles,
   Wand2,
+  Zap,
 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -55,8 +56,25 @@ interface ExecResult {
 interface SimResult {
   total: number;
   distribution: Record<string, number>;
-  changes: { cmid: string; name: string; from: string | null; to: unknown }[];
+  changes: { cmid: string; name: string; from: string | null; to: unknown; industry?: string | null; latencyMs?: number }[];
   sample: { cmid: string; canonicalName: string; industry: string | null; currentTier: string | null; decision: unknown; latencyMs: number }[];
+}
+
+interface SimProgressItem {
+  cmid: string;
+  name: string;
+  changed: boolean;
+  latencyMs: number;
+  processed: number;
+  total: number;
+}
+
+interface ExplainResult {
+  summary: string;
+  conditions: string[];
+  outputs: string[];
+  risks: string[];
+  suggestion: string;
 }
 
 export function RuleStudio({
@@ -80,6 +98,12 @@ export function RuleStudio({
 
   const [simLoading, setSimLoading] = useState(false);
   const [simResult, setSimResult] = useState<SimResult | null>(null);
+  const [simProgress, setSimProgress] = useState<SimProgressItem[]>([]);
+
+  const [explainLoading, setExplainLoading] = useState(false);
+  const [explainResult, setExplainResult] = useState<ExplainResult | null>(null);
+
+  const progressEndRef = useRef<HTMLDivElement>(null);
 
   const onPickRule = (id: string) => {
     setSelectedRuleId(id);
@@ -87,6 +111,8 @@ export function RuleStudio({
     if (r) setYaml(r.yaml);
     setExecResult(null);
     setSimResult(null);
+    setSimProgress([]);
+    setExplainResult(null);
   };
 
   const onExecute = async () => {
@@ -111,16 +137,77 @@ export function RuleStudio({
 
   const onSimulate = async () => {
     setSimLoading(true);
+    setSimResult(null);
+    setSimProgress([]);
     try {
       const res = await fetch("/api/rules/simulate", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ yaml, limit: 22 }),
+        body: JSON.stringify({ yaml, limit: 51 }),
       });
-      const json = await res.json();
-      if (res.ok) setSimResult(json);
+      const reader = res.body!.getReader();
+      const decoder = new TextDecoder();
+      let buf = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        const lines = buf.split("\n\n");
+        buf = lines.pop() ?? "";
+        for (const line of lines) {
+          if (!line.startsWith("data:")) continue;
+          const data = JSON.parse(line.slice(5).trim());
+          if (data.type === "progress") {
+            setSimProgress((p) => [
+              ...p,
+              {
+                cmid: data.cmid,
+                name: data.name,
+                changed: data.changed,
+                latencyMs: data.latencyMs,
+                processed: data.processed,
+                total: data.total,
+              },
+            ]);
+            // scroll to bottom
+            setTimeout(() => progressEndRef.current?.scrollIntoView({ behavior: "smooth" }), 0);
+          }
+          if (data.type === "complete") {
+            setSimResult({
+              total: data.total,
+              distribution: data.distribution,
+              changes: data.changes,
+              sample: [],
+            });
+          }
+        }
+      }
     } finally {
       setSimLoading(false);
+    }
+  };
+
+  const onExplain = async () => {
+    setExplainLoading(true);
+    setExplainResult(null);
+    try {
+      const res = await fetch("/api/rules/explain", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ yaml }),
+      });
+      const json = await res.json();
+      setExplainResult(json);
+    } catch {
+      setExplainResult({
+        summary: "AI 분석 실패",
+        conditions: [],
+        outputs: [],
+        risks: ["서비스에 연결할 수 없습니다."],
+        suggestion: "나중에 다시 시도하세요.",
+      });
+    } finally {
+      setExplainLoading(false);
     }
   };
 
@@ -161,19 +248,79 @@ export function RuleStudio({
           <CardHeader>
             <CardTitle className="flex items-center justify-between">
               <span>YAML 정의 (편집 가능)</span>
-              <Button size="sm" variant="ghost" onClick={() => selectedRule && setYaml(selectedRule.yaml)}>
-                되돌리기
-              </Button>
+              <div className="flex items-center gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={onExplain}
+                  disabled={explainLoading}
+                >
+                  {explainLoading ? (
+                    <Loader2 className="size-3.5 animate-spin" />
+                  ) : (
+                    <Sparkles className="size-3.5" />
+                  )}
+                  AI 분석
+                </Button>
+                <Button size="sm" variant="ghost" onClick={() => selectedRule && setYaml(selectedRule.yaml)}>
+                  되돌리기
+                </Button>
+              </div>
             </CardTitle>
           </CardHeader>
-          <CardBody>
+          <CardBody className="space-y-3">
             <textarea
               value={yaml}
               onChange={(e) => setYaml(e.target.value)}
-              rows={24}
+              rows={22}
               className="w-full font-mono text-[12px] leading-relaxed bg-[color:var(--color-muted)] rounded-md p-3 border border-[color:var(--color-border)] focus:outline-none focus:ring-2 focus:ring-[color:var(--color-brand-ink)]/15 scrollbar-thin"
               spellCheck={false}
             />
+
+            {/* AI Explainer Panel */}
+            {explainResult && (
+              <div className="rounded-md border border-[color:var(--color-border)] p-3 space-y-2.5 text-xs">
+                <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-[color:var(--color-muted-foreground)] font-medium">
+                  <Sparkles className="size-3" /> AI 룰 분석 결과
+                </div>
+                <div className="font-semibold text-sm">{explainResult.summary}</div>
+                {explainResult.conditions.length > 0 && (
+                  <div>
+                    <div className="font-medium mb-1 text-[color:var(--color-muted-foreground)]">조건</div>
+                    <ul className="space-y-0.5 list-disc list-inside">
+                      {explainResult.conditions.map((c, i) => (
+                        <li key={i}>{c}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {explainResult.outputs.length > 0 && (
+                  <div>
+                    <div className="font-medium mb-1 text-[color:var(--color-muted-foreground)]">출력 결과</div>
+                    <ul className="space-y-0.5 list-disc list-inside">
+                      {explainResult.outputs.map((o, i) => (
+                        <li key={i}>{o}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {explainResult.risks.length > 0 && (
+                  <div className="bg-amber-50 border border-amber-200 rounded px-2.5 py-2">
+                    <div className="font-medium mb-1 text-amber-700">주의사항</div>
+                    <ul className="space-y-0.5 list-disc list-inside text-amber-800">
+                      {explainResult.risks.map((r, i) => (
+                        <li key={i}>{r}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {explainResult.suggestion && (
+                  <div className="bg-blue-50 border border-blue-200 rounded px-2.5 py-2 text-blue-800">
+                    <span className="font-medium">개선 제안:</span> {explainResult.suggestion}
+                  </div>
+                )}
+              </div>
+            )}
           </CardBody>
         </Card>
       </div>
@@ -232,7 +379,19 @@ export function RuleStudio({
               </Button>
             </div>
 
-            {simResult && <SimResultView result={simResult} />}
+            {/* Real-time progress feed */}
+            {(simLoading || simProgress.length > 0) && !simResult && (
+              <SimProgressFeed progress={simProgress} progressEndRef={progressEndRef} />
+            )}
+
+            {simResult && (
+              <SimResultView
+                result={simResult}
+                accounts={accounts}
+                progress={simProgress}
+                progressEndRef={progressEndRef}
+              />
+            )}
           </CardBody>
         </Card>
 
@@ -270,11 +429,60 @@ export function RuleStudio({
   );
 }
 
+// ---- Progress Feed ----
+
+function SimProgressFeed({
+  progress,
+  progressEndRef,
+}: {
+  progress: SimProgressItem[];
+  progressEndRef: React.RefObject<HTMLDivElement | null>;
+}) {
+  const latest = progress[progress.length - 1];
+  const processed = latest?.processed ?? 0;
+  const total = latest?.total ?? 1;
+  const pct = Math.round((processed / total) * 100);
+
+  return (
+    <div className="rounded-md border border-[color:var(--color-border)] overflow-hidden">
+      {/* Progress bar */}
+      <div className="h-1.5 bg-[color:var(--color-muted)]">
+        <div
+          className="h-full bg-[color:var(--color-brand-lime)] transition-all duration-200"
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+      <div className="px-3 py-1.5 text-[10px] text-[color:var(--color-muted-foreground)] flex items-center justify-between">
+        <span>처리 중… {processed} / {total}</span>
+        <span>{pct}%</span>
+      </div>
+      {/* Scrolling account rows */}
+      <div className="max-h-40 overflow-y-auto divide-y divide-[color:var(--color-border)]">
+        {progress.map((item, i) => (
+          <div key={i} className="flex items-center gap-2 px-3 py-1.5 text-xs">
+            <span className="flex-1 font-medium truncate">{item.name}</span>
+            <span className="text-[color:var(--color-muted-foreground)] tabular-nums text-[10px]">
+              {item.latencyMs}ms
+            </span>
+            {item.changed ? (
+              <Badge tone="lime">변경</Badge>
+            ) : (
+              <Badge tone="neutral">유지</Badge>
+            )}
+          </div>
+        ))}
+        <div ref={progressEndRef} />
+      </div>
+    </div>
+  );
+}
+
+// ---- ExecResult ----
+
 function ExecResultView({ result }: { result: ExecResult }) {
   const isOk = result.status === "ok";
-  const decisionEntries = result.decision
-    ? Object.entries(result.decision)
-    : [];
+  const decisionEntries = result.decision ? Object.entries(result.decision) : [];
+  const d = result.decision ?? {};
 
   return (
     <div className="space-y-3">
@@ -390,15 +598,148 @@ function ExecResultView({ result }: { result: ExecResult }) {
           </div>
         </div>
       )}
+
+      {/* Cascade Effects */}
+      {result.decision && (
+        <CascadeEffects decision={d} />
+      )}
     </div>
   );
 }
 
-function SimResultView({ result }: { result: SimResult }) {
-  const buckets = ["A", "B", "C", "D"];
-  const max = Math.max(...Object.values(result.distribution));
+function CascadeEffects({ decision }: { decision: Record<string, unknown> }) {
+  const effects: { icon: React.ReactNode; text: string; tone: "lime" | "warning" | "ink" }[] = [];
+
+  if (decision.customer_tier) {
+    effects.push({
+      icon: <Zap className="size-3" />,
+      text: "→ 추천 스코어 재계산 트리거됨",
+      tone: "lime",
+    });
+  }
+  if (decision.requires_approval) {
+    effects.push({
+      icon: <Clock className="size-3" />,
+      text: "→ HITL 게이트 대기열에 추가됩니다",
+      tone: "warning",
+    });
+  }
+  if (decision.emit_event) {
+    effects.push({
+      icon: <Sparkles className="size-3" />,
+      text: `→ Event Grid 이벤트 발행: ${String(decision.emit_event)}`,
+      tone: "ink",
+    });
+  }
+
+  if (effects.length === 0) return null;
+
   return (
-    <div className="space-y-3">
+    <div className="rounded-md border border-[color:var(--color-border)] p-3">
+      <div className="text-[10px] uppercase tracking-wider text-[color:var(--color-muted-foreground)] font-medium mb-1.5 flex items-center gap-1">
+        <Zap className="size-3" /> 연쇄 효과
+      </div>
+      <div className="space-y-1.5">
+        {effects.map((e, i) => (
+          <div key={i} className="flex items-center gap-2 text-xs">
+            <Badge tone={e.tone}>{e.icon}</Badge>
+            <span>{e.text}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ---- SimResult ----
+
+const TIER_COLORS: Record<string, string> = {
+  A: "bg-lime-500",
+  B: "bg-blue-500",
+  C: "bg-amber-400",
+  D: "bg-gray-400",
+};
+
+function tierColor(tier: string) {
+  return TIER_COLORS[tier] ?? "bg-gray-300";
+}
+
+function SimResultView({
+  result,
+  accounts,
+  progress,
+  progressEndRef,
+}: {
+  result: SimResult;
+  accounts: AccountRow[];
+  progress: SimProgressItem[];
+  progressEndRef: React.RefObject<HTMLDivElement | null>;
+}) {
+  const buckets = ["A", "B", "C", "D"];
+  const max = Math.max(...Object.values(result.distribution), 1);
+
+  // Build current distribution from accounts prop
+  const currentDist: Record<string, number> = {};
+  for (const a of accounts) {
+    const k = a.customerTier ?? "변화없음";
+    currentDist[k] = (currentDist[k] ?? 0) + 1;
+  }
+  const totalAccounts = accounts.length || 1;
+
+  return (
+    <div className="space-y-4">
+      {/* Before/After distribution bar */}
+      <div className="rounded-md border border-[color:var(--color-border)] p-3 space-y-2">
+        <div className="text-[10px] uppercase tracking-wider text-[color:var(--color-muted-foreground)] font-medium">
+          Tier 분포 비교 (현재 vs 예상)
+        </div>
+        <div className="space-y-2">
+          {/* Current */}
+          <div>
+            <div className="text-[10px] text-[color:var(--color-muted-foreground)] mb-1">현재</div>
+            <div className="flex h-5 rounded overflow-hidden gap-px">
+              {buckets.map((b) => {
+                const cnt = currentDist[b] ?? 0;
+                const pct = (cnt / totalAccounts) * 100;
+                if (pct === 0) return null;
+                return (
+                  <div
+                    key={b}
+                    title={`Tier ${b}: ${cnt}건`}
+                    className={cn("flex items-center justify-center text-[9px] text-white font-bold", tierColor(b))}
+                    style={{ width: `${pct}%` }}
+                  >
+                    {cnt > 0 ? b : ""}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+          {/* Projected */}
+          <div>
+            <div className="text-[10px] text-[color:var(--color-muted-foreground)] mb-1">예상 (룰 적용 후)</div>
+            <div className="flex h-5 rounded overflow-hidden gap-px">
+              {buckets.map((b) => {
+                const cnt = result.distribution[b] ?? 0;
+                const pct = (cnt / totalAccounts) * 100;
+                if (pct === 0) return null;
+                return (
+                  <div
+                    key={b}
+                    title={`Tier ${b}: ${cnt}건`}
+                    className={cn("flex items-center justify-center text-[9px] text-white font-bold", tierColor(b))}
+                    style={{ width: `${pct}%` }}
+                  >
+                    {cnt > 0 ? b : ""}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Distribution counts */}
       <div className="grid grid-cols-4 gap-2">
         {buckets.map((b) => (
           <div
@@ -419,33 +760,75 @@ function SimResultView({ result }: { result: SimResult }) {
         ))}
       </div>
 
-      <div>
-        <div className="text-xs font-semibold mb-1.5 flex items-center gap-1.5">
-          <Clock className="size-3.5" /> 영향 변경 — {result.changes.length}건
+      {/* Change count badge */}
+      <div className="flex items-center gap-2">
+        <div className="text-xs font-semibold flex items-center gap-1.5">
+          <Clock className="size-3.5" /> 영향 변경
         </div>
-        {result.changes.length === 0 ? (
-          <div className="text-xs text-[color:var(--color-muted-foreground)]">
-            현재 룰을 적용해도 변경되는 광고주가 없습니다.
-          </div>
+        {result.changes.length > 0 ? (
+          <span className="inline-flex items-center rounded-full bg-red-100 text-red-700 text-xs font-bold px-2.5 py-0.5">
+            변경 {result.changes.length}건
+          </span>
         ) : (
-          <div className="space-y-1">
-            {result.changes.slice(0, 12).map((c) => (
-              <div
-                key={c.cmid}
-                className="flex items-center justify-between gap-2 text-xs rounded px-2 py-1.5 border border-[color:var(--color-border)]"
-              >
-                <span className="font-medium">{c.name}</span>
-                <span className="text-[color:var(--color-muted-foreground)]">
-                  Tier{" "}
-                  <span className="font-mono">{c.from ?? "—"}</span>
-                  {" → "}
-                  <b className="text-[color:var(--color-foreground)] font-mono">{String(c.to)}</b>
-                </span>
-              </div>
-            ))}
-          </div>
+          <Badge tone="neutral">변경 없음</Badge>
         )}
       </div>
+
+      {result.changes.length === 0 ? (
+        <div className="text-xs text-[color:var(--color-muted-foreground)]">
+          현재 룰을 적용해도 변경되는 광고주가 없습니다.
+        </div>
+      ) : (
+        <div className="space-y-1">
+          {result.changes.slice(0, 12).map((c) => (
+            <div
+              key={c.cmid}
+              className="flex items-center justify-between gap-2 text-xs rounded px-2 py-1.5 border border-[color:var(--color-border)]"
+            >
+              <span className="font-medium">{c.name}</span>
+              {c.industry && (
+                <span className="text-[color:var(--color-muted-foreground)] text-[10px]">{c.industry}</span>
+              )}
+              <span className="text-[color:var(--color-muted-foreground)]">
+                Tier{" "}
+                <span className="font-mono">{c.from ?? "—"}</span>
+                {" → "}
+                <b className="text-[color:var(--color-foreground)] font-mono">{String(c.to)}</b>
+              </span>
+              {c.latencyMs != null && (
+                <span className="text-[color:var(--color-muted-foreground)] tabular-nums text-[10px]">
+                  {c.latencyMs}ms
+                </span>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Collapsed progress log */}
+      {progress.length > 0 && (
+        <details className="text-xs">
+          <summary className="cursor-pointer text-[color:var(--color-muted-foreground)] select-none">
+            처리 로그 {progress.length}건 보기
+          </summary>
+          <div className="mt-2 max-h-48 overflow-y-auto rounded-md border border-[color:var(--color-border)] divide-y divide-[color:var(--color-border)]">
+            {progress.map((item, i) => (
+              <div key={i} className="flex items-center gap-2 px-3 py-1.5">
+                <span className="flex-1 font-medium truncate">{item.name}</span>
+                <span className="text-[color:var(--color-muted-foreground)] tabular-nums text-[10px]">
+                  {item.latencyMs}ms
+                </span>
+                {item.changed ? (
+                  <Badge tone="lime">변경</Badge>
+                ) : (
+                  <Badge tone="neutral">유지</Badge>
+                )}
+              </div>
+            ))}
+            <div ref={progressEndRef} />
+          </div>
+        </details>
+      )}
     </div>
   );
 }
