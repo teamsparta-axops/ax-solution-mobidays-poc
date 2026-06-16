@@ -20,7 +20,8 @@ jobs:
         uses: teamsparta-axops/axops-rtan-pr@main
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.AXOPS_LLM_API_KEY }}
+          OPENAI_API_BASE: "http://ts-ax-dc-kr1-cls1-gpu001.local:8000/v1"
         with:
           args: "auto_review"
 
@@ -33,7 +34,8 @@ jobs:
         uses: teamsparta-axops/axops-rtan-pr@main
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.AXOPS_LLM_API_KEY }}
+          OPENAI_API_BASE: "http://ts-ax-dc-kr1-cls1-gpu001.local:8000/v1"
         with:
           args: "self_review"
 
@@ -46,7 +48,7 @@ jobs:
         uses: teamsparta-axops/axops-rtan-pr@main
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.AXOPS_LLM_API_KEY }}
+          OPENAI_API_BASE: "http://ts-ax-dc-kr1-cls1-gpu001.local:8000/v1"
         with:
           args: "adr_compliance"
-
