@@ -1,0 +1,52 @@
+name: "🤖 RTAN PR Review"
+
+on:
+  pull_request:
+    types: [opened, reopened, ready_for_review]
+  issue_comment:
+
+permissions:
+  issues: write
+  pull-requests: write
+  contents: read
+
+jobs:
+  rtan-review:
+    if: ${{ github.event.sender.type != 'Bot' }}
+    runs-on: [self-hosted, macOS]
+    name: RTAN PR 리뷰
+    steps:
+      - name: RTAN PR Review
+        uses: teamsparta-axops/axops-rtan-pr@main
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        with:
+          args: "auto_review"
+
+  rtan-self-review:
+    if: ${{ github.event_name == 'pull_request' }}
+    runs-on: [self-hosted, macOS]
+    name: RTAN 셀프리뷰
+    steps:
+      - name: RTAN Self Review
+        uses: teamsparta-axops/axops-rtan-pr@main
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        with:
+          args: "self_review"
+
+  rtan-adr-check:
+    if: ${{ github.event_name == 'pull_request' }}
+    runs-on: [self-hosted, macOS]
+    name: RTAN ADR 컴플라이언스
+    steps:
+      - name: RTAN ADR Check
+        uses: teamsparta-axops/axops-rtan-pr@main
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        with:
+          args: "adr_compliance"
+
