@@ -10,18 +10,20 @@ permissions:
   pull-requests: write
   contents: read
 
+env:
+  OPENAI_API_KEY: ${{ secrets.AXOPS_LLM_API_KEY }}
+  OPENAI_API_BASE: "http://ts-ax-dc-kr1-cls1-gpu001.local:8000/v1"
+
 jobs:
   rtan-review:
     if: ${{ github.event.sender.type != 'Bot' }}
     runs-on: [self-hosted, macOS]
     name: RTAN PR 리뷰
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - name: RTAN PR Review
         uses: teamsparta-axops/axops-rtan-pr@main
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          OPENAI_API_KEY: ${{ secrets.AXOPS_LLM_API_KEY }}
-          OPENAI_API_BASE: "http://ts-ax-dc-kr1-cls1-gpu001.local:8000/v1"
         with:
           args: "auto_review"
 
@@ -29,13 +31,11 @@ jobs:
     if: ${{ github.event_name == 'pull_request' }}
     runs-on: [self-hosted, macOS]
     name: RTAN 셀프리뷰
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - name: RTAN Self Review
         uses: teamsparta-axops/axops-rtan-pr@main
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          OPENAI_API_KEY: ${{ secrets.AXOPS_LLM_API_KEY }}
-          OPENAI_API_BASE: "http://ts-ax-dc-kr1-cls1-gpu001.local:8000/v1"
         with:
           args: "self_review"
 
@@ -43,12 +43,10 @@ jobs:
     if: ${{ github.event_name == 'pull_request' }}
     runs-on: [self-hosted, macOS]
     name: RTAN ADR 컴플라이언스
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - name: RTAN ADR Check
         uses: teamsparta-axops/axops-rtan-pr@main
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          OPENAI_API_KEY: ${{ secrets.AXOPS_LLM_API_KEY }}
-          OPENAI_API_BASE: "http://ts-ax-dc-kr1-cls1-gpu001.local:8000/v1"
         with:
           args: "adr_compliance"
